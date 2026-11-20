@@ -5,12 +5,11 @@ They back the answers in DECISIONS.md section 4:
   * idempotency holds across independent SQLite connections (i.e. processes)
   * reusing a key with a different body is rejected with 409
   * a downstream outage delays delivery but loses nothing
-  * a hard crash (SIGKILL) right after acknowledging loses nothing
+  * a hard crash (kill, no graceful shutdown) right after acknowledging loses nothing
 """
 
 import asyncio
 import os
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -170,7 +169,7 @@ async def test_sigkill_after_ack_loses_nothing(tmp_path):
                 *(c.post(f"{INGEST_URL}/webhooks/ingest", json=_payload(i), headers={"X-Idempotency-Key": f"c{i}"}) for i in range(10))
             )
             assert all(r.status_code == 202 for r in rs)
-            ing.send_signal(signal.SIGKILL)  # no graceful shutdown at all
+            ing.kill()  # hard kill: SIGKILL on Linux/macOS, TerminateProcess on Windows
             ing.wait(timeout=5)
             assert len(_statuses(db_file)) == 10  # every acked event is durable
 
