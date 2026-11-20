@@ -30,3 +30,26 @@ pytest -v -s
 ## Constraints
 - **No external infrastructure:** Keep the solution self-contained using Python and SQLite (do not add Redis, Celery, RabbitMQ, or PostgreSQL).
 - Complete `DECISIONS.md` explaining your root-cause diagnosis and architectural choices.
+
+---
+
+## Solution Overview
+See [`DECISIONS.md`](DECISIONS.md) for the full diagnosis and trade-offs.
+
+```
+POST /webhooks/ingest ──► INSERT … ON CONFLICT DO NOTHING (UNIQUE idempotency_key) ──► 202
+                                   │ row id
+                                   ▼
+                 scrub workers ──► ProcessPoolExecutor (PII scrub + fingerprint) ──► status=pending
+                                   │
+                                   ▼
+              delivery workers ──► shared httpx client, retry 5xx/timeouts w/ backoff+jitter ──► status=delivered
+```
+
+* `app/main.py`: thin request path, persists then acknowledges with `202`; duplicates get `202 {"duplicate": true}`, same key with a different body gets `409`.
+* `app/database.py`: single SQLite connection on a dedicated thread, WAL, idempotency via `UNIQUE` constraint, lease-based work claiming.
+* `app/pipeline.py`: CPU stage (process pool) and I/O stage (bounded async workers), crash recovery and lease reaper.
+* `app/downstream.py`: pooled HTTP client; classifies transient vs. permanent failures.
+* `tests/test_resilience.py`: extra tests for cross-connection idempotency, `409` on key reuse, downstream outage recovery, and SIGKILL-after-ack durability.
+
+Tunables (env vars): `SCRUB_WORKERS`, `DELIVERY_CONCURRENCY`, `DELIVERY_BASE_BACKOFF`, `DELIVERY_MAX_BACKOFF`, `DELIVERY_GIVE_UP_SECONDS`, `DELIVERY_MAX_ATTEMPTS`, `WORK_LEASE_SECONDS`, `REAP_INTERVAL_SECONDS`.
