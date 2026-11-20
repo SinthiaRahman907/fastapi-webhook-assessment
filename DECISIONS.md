@@ -47,3 +47,11 @@ How does your implementation guarantee zero duplicate processing when two identi
 - `pytest -v -s` runs the provided burst harness plus 4 extra failure-mode tests (`tests/test_resilience.py`).
 - On the original code the harness fails immediately (500s from unhandled 503s, duplicates). On this code the ingest p95 is **~55–110 ms** (target < 250 ms), there are exactly **30 rows and 30 downstream deliveries**, every row ends `delivered` with no PII, and the whole run takes about 2.5 s.
 - **About the `/health < 50 ms` assertion:** I developed this in a **2-vCPU container**, where that assertion is borderline. I looked into it in detail. The harness's first probe fires at the same instant as the 60 POSTs, so it measures how long the whole burst takes to round-trip, test client included. In the same environment, the *same* probe against a FastAPI app that does no work at all measured 41–57 ms, and against a bare ASGI app that returns immediately it measured 64–115 ms. The service is at the environment's floor, and the variance comes from the client and CPU scheduling on 2 vCPUs, not from the event loop (every later probe during the run is around 10–20 ms). On a typical 4+ core machine the floor is far below 50 ms.
+- **Windows is not a meaningful environment for these thresholds.** On a 4-CPU Windows 11 laptop (Python 3.14), `python diag.py` gave these numbers. The script replays the harness's burst against an empty FastAPI app and then against this service.
+
+  | | ingest p95 | max `/health` |
+  |---|---|---|
+  | Empty FastAPI app (no work at all) | 449–578 ms | 415–535 ms |
+  | This service | 425–513 ms | 322–425 ms |
+
+  An app that does nothing misses both targets by the same margin, so on Windows the harness measures the OS's loopback and asyncio connection handling (no uvloop), not the service. The service adds no measurable latency on top of that floor. The thresholds are meant for the Linux container the README refers to; run `python diag.py` on any machine to see that machine's floor next to the service.
