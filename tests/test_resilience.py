@@ -159,6 +159,10 @@ async def test_sigkill_after_ack_loses_nothing(tmp_path):
     """Acknowledged events survive a hard crash and are finished after restart."""
     db_file = tmp_path / "c.db"
     env = _env(db_file)
+    # The hard kill below is intentional, so the killed server can't release its
+    # multiprocessing semaphores; Python's resource tracker then cleans them up
+    # and prints a "leaked semaphore" UserWarning. Silence that expected noise.
+    env["PYTHONWARNINGS"] = "ignore:resource_tracker:UserWarning"
     ds = _start("mock_downstream:app", DOWNSTREAM_PORT, env)
     ing = _start("app.main:app", INGEST_PORT, env)
     try:

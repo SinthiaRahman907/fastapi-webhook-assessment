@@ -53,4 +53,9 @@ POST /webhooks/ingest ──► INSERT … ON CONFLICT DO NOTHING (UNIQUE idempo
 * `diag.py`: replays the burst against an empty FastAPI app and the real service side by side, to show the machine's latency floor (`python diag.py`).
 * `tests/test_resilience.py`: extra tests for cross-connection idempotency, `409` on key reuse, downstream outage recovery, hard-kill-after-ack durability, and no double delivery when an attempt outlasts its lease.
 
+### Running the tests: what to expect
+* **Python 3.11–3.14.** On Python 3.15, `pip install` currently fails because `pyyaml` (pulled in by `uvicorn[standard]`) has no pre-built 3.15 wheels yet and needs a C++ compiler.
+* `pytest -v -s` runs 6 tests: the provided burst harness plus 5 resilience tests. All resilience tests pass on Linux and Windows (both verified).
+* The harness's two **latency thresholds** (`/health` < 50 ms, ingest p95 < 250 ms) measure the whole machine, test client included. On Linux the ingest target passes comfortably (~55–110 ms p95); `/health` is borderline on a small 2-vCPU box because even an empty server sits near 50 ms there, and should have more headroom with more cores. On **Windows** even an *empty* FastAPI app misses them (~450 ms p95 measured), so a timing failure there says nothing about the service. Run `python diag.py` to see your machine's floor next to the service; see "Verification notes" in `DECISIONS.md`.
+
 Tunables (env vars): `SCRUB_WORKERS`, `DELIVERY_CONCURRENCY`, `DELIVERY_BASE_BACKOFF`, `DELIVERY_MAX_BACKOFF`, `DELIVERY_GIVE_UP_SECONDS`, `DELIVERY_MAX_ATTEMPTS`, `DELIVERY_ATTEMPT_TIMEOUT`, `WORK_LEASE_SECONDS`, `REAP_INTERVAL_SECONDS`.
