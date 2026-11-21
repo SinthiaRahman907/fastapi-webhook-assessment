@@ -221,6 +221,14 @@ class Database:
             )
         )
 
+    async def renew_lease(self, row_id: int, lease_seconds: float) -> None:
+        await self._run(
+            lambda c: c.execute(
+                "UPDATE events SET lease_until = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (time.time() + lease_seconds, row_id),
+            )
+        )
+
     async def record_attempt(self, row_id: int, attempts: int, error: str, lease_seconds: float) -> None:
         await self._run(
             lambda c: c.execute(

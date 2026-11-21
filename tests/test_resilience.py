@@ -6,6 +6,7 @@ They back the answers in DECISIONS.md section 4:
   * reusing a key with a different body is rejected with 409
   * a downstream outage delays delivery but loses nothing
   * a hard crash (kill, no graceful shutdown) right after acknowledging loses nothing
+  * a delivery attempt slower than the work lease is never delivered twice
 """
 
 import asyncio
@@ -35,6 +36,7 @@ def _env(db_file) -> dict:
         DELIVERY_MAX_BACKOFF="0.5",
         DELIVERY_GIVE_UP_SECONDS="60",
         WORK_LEASE_SECONDS="1",
+        DELIVERY_ATTEMPT_TIMEOUT="4",
         REAP_INTERVAL_SECONDS="0.3",
     )
     return env
@@ -74,7 +76,7 @@ def _statuses(db_file) -> list[str]:
         conn.close()
 
 
-async def _wait_all_delivered(db_file, n: int, timeout: float = 15.0) -> list[str]:
+async def _wait_all_delivered(db_file, n: int, timeout: float = 30.0) -> list[str]:
     deadline = time.monotonic() + timeout
     statuses: list[str] = []
     while time.monotonic() < deadline:
@@ -179,6 +181,34 @@ async def test_sigkill_after_ack_loses_nothing(tmp_path):
             assert statuses == ["delivered"] * 10
             stats = (await c.get(f"{DOWNSTREAM_URL}/stats")).json()
             assert stats["unique_events"] == 10
+    finally:
+        _stop(ing)
+        _stop(ds)
+
+
+async def test_slow_attempt_longer_than_lease_is_not_delivered_twice(tmp_path):
+    """
+    Regression test: each downstream call takes 2.5 s while the work lease is
+    1 s. Without per-attempt lease renewal, the reaper would hand the row to a
+    second worker mid-attempt and the event would be delivered twice. (This is
+    what happens on Windows, where connecting to a down port takes ~2 s.)
+    """
+    db_file = tmp_path / "s.db"
+    env = _env(db_file)
+    ds = _start("tests._slow_downstream:app", DOWNSTREAM_PORT, env)
+    ing = _start("app.main:app", INGEST_PORT, env)
+    try:
+        await _wait_ok(f"{DOWNSTREAM_URL}/stats")
+        await _wait_ok(f"{INGEST_URL}/health")
+        async with httpx.AsyncClient() as c:
+            for i in range(3):
+                r = await c.post(f"{INGEST_URL}/webhooks/ingest", json=_payload(i), headers={"X-Idempotency-Key": f"s{i}"})
+                assert r.status_code == 202
+            statuses = await _wait_all_delivered(db_file, 3)
+            assert statuses == ["delivered"] * 3
+            await asyncio.sleep(3.0)  # give any duplicate attempt time to land
+            stats = (await c.get(f"{DOWNSTREAM_URL}/stats")).json()
+            assert stats["total_accepted"] == stats["unique_events"] == 3, stats
     finally:
         _stop(ing)
         _stop(ds)

@@ -99,6 +99,11 @@ class Pipeline:
         self.base_backoff = float(os.getenv("DELIVERY_BASE_BACKOFF", "0.2"))
         self.max_backoff = float(os.getenv("DELIVERY_MAX_BACKOFF", "30"))
         self.lease_seconds = float(os.getenv("WORK_LEASE_SECONDS", "30"))
+        # Hard upper bound on one delivery attempt. The lease held during an
+        # attempt is always attempt_timeout + lease_seconds, so a slow attempt
+        # can never outlive its lease and let a second worker deliver the same
+        # row concurrently.
+        self.attempt_timeout = float(os.getenv("DELIVERY_ATTEMPT_TIMEOUT", "10"))
         self.reap_interval = float(os.getenv("REAP_INTERVAL_SECONDS", "10"))
 
         self.scrub_queue: asyncio.Queue[int] = asyncio.Queue()
@@ -211,10 +216,16 @@ class Pipeline:
         first_try = loop_time()
         while True:
             attempts += 1
+            # Renew the lease so it covers the worst-case duration of this attempt.
+            await self.db.renew_lease(row_id, self.attempt_timeout + self.lease_seconds)
             try:
-                await forward_event(
-                    self.client, row.event_id, row.cleaned_text, row.fingerprint, row.idempotency_key
-                )
+                try:
+                    async with asyncio.timeout(self.attempt_timeout):
+                        await forward_event(
+                            self.client, row.event_id, row.cleaned_text, row.fingerprint, row.idempotency_key
+                        )
+                except TimeoutError as exc:
+                    raise TransientDeliveryError(f"attempt exceeded {self.attempt_timeout}s") from exc
             except PermanentDeliveryError as exc:
                 log.warning("permanent failure for %s: %s", row.event_id, exc)
                 await self.db.mark_failed(row_id, attempts, str(exc))

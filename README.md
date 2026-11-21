@@ -51,6 +51,6 @@ POST /webhooks/ingest ──► INSERT … ON CONFLICT DO NOTHING (UNIQUE idempo
 * `app/pipeline.py`: CPU stage (process pool) and I/O stage (bounded async workers), crash recovery and lease reaper.
 * `app/downstream.py`: pooled HTTP client; classifies transient vs. permanent failures.
 * `diag.py`: replays the burst against an empty FastAPI app and the real service side by side, to show the machine's latency floor (`python diag.py`).
-* `tests/test_resilience.py`: extra tests for cross-connection idempotency, `409` on key reuse, downstream outage recovery, and SIGKILL-after-ack durability.
+* `tests/test_resilience.py`: extra tests for cross-connection idempotency, `409` on key reuse, downstream outage recovery, hard-kill-after-ack durability, and no double delivery when an attempt outlasts its lease.
 
-Tunables (env vars): `SCRUB_WORKERS`, `DELIVERY_CONCURRENCY`, `DELIVERY_BASE_BACKOFF`, `DELIVERY_MAX_BACKOFF`, `DELIVERY_GIVE_UP_SECONDS`, `DELIVERY_MAX_ATTEMPTS`, `WORK_LEASE_SECONDS`, `REAP_INTERVAL_SECONDS`.
+Tunables (env vars): `SCRUB_WORKERS`, `DELIVERY_CONCURRENCY`, `DELIVERY_BASE_BACKOFF`, `DELIVERY_MAX_BACKOFF`, `DELIVERY_GIVE_UP_SECONDS`, `DELIVERY_MAX_ATTEMPTS`, `DELIVERY_ATTEMPT_TIMEOUT`, `WORK_LEASE_SECONDS`, `REAP_INTERVAL_SECONDS`.
