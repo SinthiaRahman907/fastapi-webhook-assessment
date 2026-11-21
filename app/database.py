@@ -9,7 +9,7 @@ Design notes
   i.e. exactly one thread hop / event-loop wake-up per operation.
 
   - The original code opened a brand-new aiosqlite connection (and thread)
-    three times per request, so a 60-request burst created ~180
+    twice per request, so a 60-request burst created ~120
     connections/threads that all fought over SQLite's single write lock.
   - Sharing one aiosqlite connection between coroutines is also unsafe:
     coroutine A can hold an open RETURNING cursor while coroutine B issues
@@ -34,9 +34,10 @@ import asyncio
 import os
 import sqlite3
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 DB_PATH = os.getenv("WEBHOOK_DB_PATH", "webhooks.db")
 

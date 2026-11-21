@@ -17,7 +17,6 @@ import sys
 import time
 
 import httpx
-import pytest
 
 from app.database import Database
 

@@ -48,8 +48,8 @@ async def wait_up(url):
             try:
                 if (await c.get(url)).status_code < 500:
                     return
-            except Exception:
-                pass
+            except httpx.TransportError:
+                pass  # server still starting; retry
             await asyncio.sleep(0.1)
     raise RuntimeError(f"{url} did not start")
 
